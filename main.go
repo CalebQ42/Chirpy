@@ -1,26 +1,35 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
 
 func main() {
+	db := OpenFakeDB("database.json")
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	apiCfg := &apiConfig{}
+	fileHandle := http.StripPrefix("/app", http.FileServer(http.Dir("./server")))
+	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(fileHandle))
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	apiCfg := &apiConfig{}
-	fileHandle := http.StripPrefix("/app", http.FileServer(http.Dir("./server")))
-	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(fileHandle))
-	mux.Handle("GET /metrics/", apiCfg.metrics())
-	mux.Handle("/reset", apiCfg.reset())
+	mux.HandleFunc("GET /admin/metrics/", apiCfg.metrics)
+	mux.HandleFunc("/api/reset", apiCfg.reset)
 	serv := http.Server{
 		Addr:    ":8080",
 		Handler: middlewareCors(mux),
 	}
+	mux.HandleFunc("POST /api/chirps", db.chirp)
+	mux.HandleFunc("GET /api/chirps", db.allChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", db.getChirp)
+
+	mux.HandleFunc("POST /api/users", db.addUser)
+	mux.HandleFunc("POST /api/login", db.login)
+
 	err := serv.ListenAndServe()
 	fmt.Println(err)
 }
@@ -36,4 +45,10 @@ func middlewareCors(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func sendError(w http.ResponseWriter, code int, msg string) {
+	w.WriteHeader(code)
+	out, _ := json.Marshal(map[string]string{"error": msg})
+	w.Write(out)
 }
