@@ -7,12 +7,16 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	mux.Handle("/app/*", http.StripPrefix("/app", http.FileServer(http.Dir("./server"))))
+	apiCfg := &apiConfig{}
+	fileHandle := http.StripPrefix("/app", http.FileServer(http.Dir("./server")))
+	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(fileHandle))
+	mux.Handle("GET /metrics/", apiCfg.metrics())
+	mux.Handle("/reset", apiCfg.reset())
 	serv := http.Server{
 		Addr:    ":8080",
 		Handler: middlewareCors(mux),
