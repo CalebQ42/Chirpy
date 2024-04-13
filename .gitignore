@@ -20,4 +20,9 @@
 # Go workspace file
 go.work
 
+# Envirnoment
+.env
+database.json
+
+# Application
 Chirpy

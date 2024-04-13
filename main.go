@@ -2,16 +2,28 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
+	"log"
 	"net/http"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	db := OpenFakeDB("database.json")
+	debug := flag.Bool("debug", false, "debug: remove db before start")
+	flag.Parse()
+	godotenv.Load()
+
+	db, err := OpenFakeDB("database.json", *debug)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	mux := http.NewServeMux()
 	apiCfg := &apiConfig{}
 	fileHandle := http.StripPrefix("/app", http.FileServer(http.Dir("./server")))
 	mux.Handle("/app/*", apiCfg.middlewareMetricsInc(fileHandle))
+
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
@@ -19,18 +31,18 @@ func main() {
 	})
 	mux.HandleFunc("GET /admin/metrics/", apiCfg.metrics)
 	mux.HandleFunc("/api/reset", apiCfg.reset)
+	mux.HandleFunc("POST /api/chirps", db.chirp)
+	mux.HandleFunc("GET /api/chirps", db.allChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", db.getChirp)
+	mux.HandleFunc("POST /api/users", db.addUser)
+	mux.HandleFunc("PUT /api/users", db.updateUser)
+	mux.HandleFunc("POST /api/login", db.login)
+
 	serv := http.Server{
 		Addr:    ":8080",
 		Handler: middlewareCors(mux),
 	}
-	mux.HandleFunc("POST /api/chirps", db.chirp)
-	mux.HandleFunc("GET /api/chirps", db.allChirps)
-	mux.HandleFunc("GET /api/chirps/{chirpID}", db.getChirp)
-
-	mux.HandleFunc("POST /api/users", db.addUser)
-	mux.HandleFunc("POST /api/login", db.login)
-
-	err := serv.ListenAndServe()
+	err = serv.ListenAndServe()
 	fmt.Println(err)
 }
 
