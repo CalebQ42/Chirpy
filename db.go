@@ -20,10 +20,6 @@ func OpenFakeDB(file string, debug bool) (*fakeDB, error) {
 	}
 	fil, err := os.Open(file)
 	if os.IsNotExist(err) {
-		fil, err = os.Create(file)
-		if err != nil {
-			return nil, err
-		}
 		return &fakeDB{
 			mut:        &sync.RWMutex{},
 			path:       file,
@@ -35,20 +31,34 @@ func OpenFakeDB(file string, debug bool) (*fakeDB, error) {
 }
 
 func load(fil *os.File) (*fakeDB, error) {
+	// This is actually terrible, don't look at it.
 	var mp map[string]any
 	err := json.NewDecoder(fil).Decode(&mp)
 	if err != nil {
 		return nil, err
 	}
+	chirps := make([]savedChirp, len(mp["chirps"].([]any)))
+	for i, c := range mp["chirps"].([]any) {
+		cMp := c.(map[string]any)
+		chirps[i] = savedChirp{
+			ID:   int(cMp["id"].(float64)),
+			Body: cMp["body"].(string),
+		}
+	}
 	db := &fakeDB{
 		mut:        &sync.RWMutex{},
 		path:       fil.Name(),
 		Users:      make(map[string]user),
-		Chirps:     mp["chirps"].([]savedChirp),
+		Chirps:     chirps,
 		jwt_secret: os.Getenv("JWT_SECRET"),
 	}
-	for _, u := range mp["users"].([]user) {
-		db.Users[u.Email] = u
+	for _, u := range mp["users"].([]any) {
+		uMp := u.(map[string]any)
+		db.Users[uMp["email"].(string)] = user{
+			Email:    uMp["email"].(string),
+			password: uMp["password"].(string),
+			ID:       int(uMp["id"].(float64)),
+		}
 	}
 	return db, nil
 }

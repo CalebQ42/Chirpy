@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,6 +38,10 @@ func (db *fakeDB) addUser(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, "Error reading body")
 		return
 	}
+	if in.Password == "" || in.Email == "" {
+		sendError(w, http.StatusBadRequest, "Both email and pasword is required")
+		return
+	}
 	_, exist := db.Users[in.Email]
 	if exist {
 		sendError(w, http.StatusFound, "User already exists with that email")
@@ -69,6 +74,10 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, "Error reading body")
 		return
 	}
+	if in.Password == "" || in.Email == "" {
+		sendError(w, http.StatusBadRequest, "Both email and pasword is required")
+		return
+	}
 	usr, ok := db.Users[in.Email]
 	if !ok {
 		sendError(w, http.StatusUnauthorized, "User with given email does not exist")
@@ -87,9 +96,10 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(in.Expiry) * time.Second)),
 		Subject:   strconv.Itoa(usr.ID),
-	}).SignedString(db.jwt_secret)
+	}).SignedString([]byte(db.jwt_secret))
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Issue creating token")
+		fmt.Println(err)
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{
@@ -135,7 +145,9 @@ func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, "Error decoding request body")
 		return
 	}
-	if _, ok := db.Users[bod.Email]; usr.Email != bod.Email && !ok {
+	db.mut.Lock()
+	defer db.mut.Unlock()
+	if _, ok := db.Users[bod.Email]; usr.Email != bod.Email && ok {
 		sendError(w, http.StatusConflict, "Updated email is already in use")
 		return
 	}
@@ -144,9 +156,9 @@ func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusInternalServerError, "Error hashing password")
 		return
 	}
-	db.mut.Lock()
-	defer db.mut.Unlock()
 	delete(db.Users, usr.Email)
 	usr.Email = bod.Email
 	usr.password = string(pwd)
+	db.Users[usr.Email] = usr
+	json.NewEncoder(w).Encode(usr)
 }
