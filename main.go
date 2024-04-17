@@ -37,6 +37,9 @@ func main() {
 	mux.HandleFunc("POST /api/users", db.addUser)
 	mux.HandleFunc("PUT /api/users", db.updateUser)
 	mux.HandleFunc("POST /api/login", db.login)
+	mux.HandleFunc("POST /api/refresh", db.refresh)
+	mux.HandleFunc("POST /api/revoke", db.revoke)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", db.deleteChirp)
 
 	serv := http.Server{
 		Addr:    ":8080",

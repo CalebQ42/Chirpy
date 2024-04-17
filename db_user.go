@@ -67,7 +67,6 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Password string
 		Email    string
-		Expiry   int `json:"expires_in_seconds"`
 	}
 	err := json.NewDecoder(r.Body).Decode(&in)
 	if err != nil {
@@ -88,13 +87,21 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusUnauthorized, "Password does not match")
 		return
 	}
-	if in.Expiry == 0 || in.Expiry > 24*60*60 {
-		in.Expiry = 24 * 60 * 60
-	}
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy-access",
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(in.Expiry) * time.Second)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Subject:   strconv.Itoa(usr.ID),
+	}).SignedString([]byte(db.jwt_secret))
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Issue creating token")
+		fmt.Println(err)
+		return
+	}
+	refreshToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy-refresh",
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(60 * 24 * time.Hour)),
 		Subject:   strconv.Itoa(usr.ID),
 	}).SignedString([]byte(db.jwt_secret))
 	if err != nil {
@@ -103,16 +110,17 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{
-		"id":    usr.ID,
-		"email": usr.Email,
-		"token": token,
+		"id":            usr.ID,
+		"email":         usr.Email,
+		"token":         accessToken,
+		"refresh_token": refreshToken,
 	})
 }
 
 func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 	reqToken := r.Header.Get("Authorization")
 	if reqToken == "" || !strings.HasPrefix(reqToken, "Bearer ") {
-		sendError(w, http.StatusBadRequest, "Please provide a valid token")
+		sendError(w, http.StatusUnauthorized, "Please provide a valid token")
 		return
 	}
 	reqToken = strings.TrimPrefix(reqToken, "Bearer ")
@@ -121,6 +129,11 @@ func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		sendError(w, http.StatusUnauthorized, "Token is not authorized")
+		return
+	}
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil || issuer != "chirpy-access" {
+		sendError(w, http.StatusUnauthorized, "Please provide an access token")
 		return
 	}
 	subj, _ := token.Claims.GetSubject()
@@ -161,4 +174,71 @@ func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 	usr.password = string(pwd)
 	db.Users[usr.Email] = usr
 	json.NewEncoder(w).Encode(usr)
+}
+
+func (db *fakeDB) refresh(w http.ResponseWriter, r *http.Request) {
+	reqToken := r.Header.Get("Authorization")
+	if reqToken == "" || !strings.HasPrefix(reqToken, "Bearer ") {
+		sendError(w, http.StatusUnauthorized, "Please provide a valid token")
+		return
+	}
+	reqToken = strings.TrimPrefix(reqToken, "Bearer ")
+	token, err := jwt.ParseWithClaims(reqToken, &jwt.RegisteredClaims{}, func(*jwt.Token) (interface{}, error) {
+		return []byte(db.jwt_secret), nil
+	})
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Token is not authorized")
+		return
+	}
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil || issuer != "chirpy-refresh" {
+		sendError(w, http.StatusUnauthorized, "Please provide a refresh token")
+		return
+	}
+	_, ok := db.Revoked[reqToken]
+	if ok {
+		sendError(w, http.StatusUnauthorized, "Provided token has been revoked")
+		return
+	}
+	usrId, err := token.Claims.GetSubject()
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Getting token subject")
+		fmt.Println(err)
+	}
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy-access",
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Subject:   usrId,
+	}).SignedString([]byte(db.jwt_secret))
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Issue creating token")
+		fmt.Println(err)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"token": accessToken,
+	})
+}
+
+func (db *fakeDB) revoke(w http.ResponseWriter, r *http.Request) {
+	reqToken := r.Header.Get("Authorization")
+	if reqToken == "" || !strings.HasPrefix(reqToken, "Bearer ") {
+		sendError(w, http.StatusUnauthorized, "Please provide a valid token")
+		return
+	}
+	reqToken = strings.TrimPrefix(reqToken, "Bearer ")
+	token, err := jwt.ParseWithClaims(reqToken, &jwt.RegisteredClaims{}, func(*jwt.Token) (interface{}, error) {
+		return []byte(db.jwt_secret), nil
+	})
+	if err != nil {
+		sendError(w, http.StatusUnauthorized, "Token is not authorized")
+		return
+	}
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil || issuer != "chirpy-refresh" {
+		sendError(w, http.StatusUnauthorized, "Please provide a refresh token")
+		return
+	}
+	db.Revoked[reqToken] = time.Now()
 }
