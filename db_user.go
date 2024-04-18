@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,14 +16,16 @@ import (
 type user struct {
 	Email    string `json:"email"`
 	password string
-	ID       int `json:"id"`
+	ID       int  `json:"id"`
+	Red      bool `json:"is_chirpy_red"`
 }
 
 func (u user) fullMarshal() map[string]any {
 	return map[string]any{
-		"id":       u.ID,
-		"email":    u.Email,
-		"password": u.password,
+		"id":            u.ID,
+		"email":         u.Email,
+		"password":      u.password,
+		"is_chirpy_red": u.Red,
 	}
 }
 
@@ -53,7 +56,7 @@ func (db *fakeDB) addUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := len(db.Users) + 1
-	db.Users[in.Email] = user{
+	db.Users[in.Email] = &user{
 		ID:       id,
 		Email:    in.Email,
 		password: string(psw),
@@ -109,12 +112,16 @@ func (db *fakeDB) login(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{
+	err = json.NewEncoder(w).Encode(map[string]any{
 		"id":            usr.ID,
 		"email":         usr.Email,
+		"is_chirpy_red": usr.Red,
 		"token":         accessToken,
 		"refresh_token": refreshToken,
 	})
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +145,7 @@ func (db *fakeDB) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	subj, _ := token.Claims.GetSubject()
 	usrID, _ := strconv.Atoi(subj)
-	var usr user
+	var usr *user
 	for i := range db.Users {
 		if db.Users[i].ID == usrID {
 			usr = db.Users[i]
@@ -241,4 +248,33 @@ func (db *fakeDB) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db.Revoked[reqToken] = time.Now()
+}
+
+func (db *fakeDB) redUpgrade(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.Header.Get("Authorization")
+	if !strings.HasPrefix(apiKey, "ApiKey ") || "ApiKey "+os.Getenv("POLKA_KEY") != apiKey {
+		sendError(w, http.StatusUnauthorized, "Invalid API Key")
+		return
+	}
+	var in struct {
+		Event string
+		Data  struct {
+			ID int `json:"user_id"`
+		}
+	}
+	err := json.NewDecoder(r.Body).Decode(&in)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Can't parse body")
+		return
+	}
+	if in.Event != "user.upgraded" {
+		return
+	}
+	for e, u := range db.Users {
+		if u.ID == in.Data.ID {
+			db.Users[e].Red = true
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
 }

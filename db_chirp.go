@@ -113,7 +113,28 @@ func (db *fakeDB) getChirp(w http.ResponseWriter, r *http.Request) {
 func (db *fakeDB) allChirps(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Header().Add("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(db.Chirps)
+	var out []savedChirp
+	authIDStr := r.URL.Query().Get("author_id")
+	if authIDStr == "" {
+		out = make([]savedChirp, len(db.Chirps))
+		copy(out, db.Chirps)
+	} else {
+		authID, err := strconv.Atoi(authIDStr)
+		if err != nil {
+			sendError(w, http.StatusBadRequest, "error parsing author_id")
+			return
+		}
+		for _, c := range db.Chirps {
+			if c.Author == authID {
+				out = append(out, c)
+			}
+		}
+	}
+	order := r.URL.Query().Get("sort")
+	if order == "desc" {
+		slices.Reverse(out)
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 func (db *fakeDB) deleteChirp(w http.ResponseWriter, r *http.Request) {

@@ -13,7 +13,10 @@ import (
 func main() {
 	debug := flag.Bool("debug", false, "debug: remove db before start")
 	flag.Parse()
-	godotenv.Load()
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalln(err)
+	}
 
 	db, err := OpenFakeDB("database.json", *debug)
 	if err != nil {
@@ -40,6 +43,8 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", db.refresh)
 	mux.HandleFunc("POST /api/revoke", db.revoke)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", db.deleteChirp)
+
+	mux.HandleFunc("POST /api/polka/webhooks", db.redUpgrade)
 
 	serv := http.Server{
 		Addr:    ":8080",

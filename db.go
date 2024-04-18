@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -9,7 +10,7 @@ import (
 
 type fakeDB struct {
 	mut        *sync.RWMutex
-	Users      map[string]user
+	Users      map[string]*user
 	Revoked    map[string]time.Time
 	path       string
 	jwt_secret string
@@ -17,6 +18,9 @@ type fakeDB struct {
 }
 
 func OpenFakeDB(file string, debug bool) (*fakeDB, error) {
+	if os.Getenv("JWT_SECRET") == "" {
+		return nil, errors.New("JWT_SECRET is not defined")
+	}
 	if debug {
 		os.Remove(file) //theoretically replace this with actually loading the values, but for this assignment (at this point) it doesn't matter.
 	}
@@ -25,7 +29,7 @@ func OpenFakeDB(file string, debug bool) (*fakeDB, error) {
 		return &fakeDB{
 			mut:        &sync.RWMutex{},
 			path:       file,
-			Users:      make(map[string]user),
+			Users:      make(map[string]*user),
 			jwt_secret: os.Getenv("JWT_SECRET"),
 			Revoked:    make(map[string]time.Time),
 		}, nil
@@ -54,7 +58,7 @@ func load(fil *os.File) (*fakeDB, error) {
 	db := &fakeDB{
 		mut:        &sync.RWMutex{},
 		path:       fil.Name(),
-		Users:      make(map[string]user),
+		Users:      make(map[string]*user),
 		Chirps:     chirps,
 		jwt_secret: os.Getenv("JWT_SECRET"),
 		Revoked:    make(map[string]time.Time),
@@ -62,7 +66,7 @@ func load(fil *os.File) (*fakeDB, error) {
 	if mp["users"] != nil {
 		for _, u := range mp["users"].([]any) {
 			uMp := u.(map[string]any)
-			db.Users[uMp["email"].(string)] = user{
+			db.Users[uMp["email"].(string)] = &user{
 				Email:    uMp["email"].(string),
 				password: uMp["password"].(string),
 				ID:       int(uMp["id"].(float64)),
